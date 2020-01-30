@@ -144,12 +144,18 @@ func NewEmptyConfig() *Config {
 	}
 }
 
+type GenesisVM interface {
+	ApplyGenesisMessage(from address.Address, to address.Address, method types.MethodID, value types.AttoFIL, params ...interface{}) (interface{}, error)
+}
+
 // MakeGenesisFunc returns a genesis function configured by a set of options.
 func MakeGenesisFunc(opts ...GenOption) GenesisInitFunc {
 	return func(cst *hamt.CborIpldStore, bs blockstore.Blockstore) (*block.Block, error) {
 		ctx := context.Background()
 		st := state.NewTree(cst)
+		store := vm.NewStorage(bs)
 		storageMap := vm.NewStorageMap(bs)
+		vm := vm.NewVM(st, store).(GenesisVM)
 
 		genCfg := NewEmptyConfig()
 		for _, opt := range opts {
@@ -158,7 +164,7 @@ func MakeGenesisFunc(opts ...GenOption) GenesisInitFunc {
 			}
 		}
 
-		if err := SetupDefaultActors(ctx, st, storageMap, genCfg.proofsMode, genCfg.network); err != nil {
+		if err := SetupDefaultActors(ctx, vm, st, storageMap, genCfg.proofsMode, genCfg.network); err != nil {
 			return nil, err
 		}
 
@@ -177,8 +183,8 @@ func MakeGenesisFunc(opts ...GenOption) GenesisInitFunc {
 			}
 			val := genCfg.accounts[addr]
 
-			_, err = ApplyMessageDirect(ctx, st, storageMap, address.LegacyNetworkAddress, address.InitAddress, 0, val,
-				initactor.ExecMethodID, types.AccountActorCodeCid, []interface{}{addr})
+			_, err = vm.ApplyGenesisMessage(address.LegacyNetworkAddress, address.InitAddress,
+				initactor.ExecMethodID, val, types.AccountActorCodeCid, []interface{}{addr})
 			if err != nil {
 				return nil, err
 			}
@@ -256,7 +262,7 @@ func MakeGenesisFunc(opts ...GenOption) GenesisInitFunc {
 }
 
 // SetupDefaultActors inits the builtin actors that are required to run filecoin.
-func SetupDefaultActors(ctx context.Context, st state.Tree, storageMap vm.StorageMap, storeType types.ProofsMode, network string) error {
+func SetupDefaultActors(ctx context.Context, vm GenesisVM, st state.Tree, storageMap vm.StorageMap, storeType types.ProofsMode, network string) error {
 	stAct := storagemarket.NewActor()
 	err := (&storagemarket.Actor{}).InitializeState(storageMap.NewStorage(address.StorageMarketAddress, stAct), storeType)
 	if err != nil {
@@ -292,7 +298,7 @@ func SetupDefaultActors(ctx context.Context, st state.Tree, storageMap vm.Storag
 	}
 	sort.Strings(sortedAddresses)
 
-	for i, addrBytes := range sortedAddresses {
+	for _, addrBytes := range sortedAddresses {
 		addr, err := address.NewFromBytes([]byte(addrBytes))
 		if err != nil {
 			return err
@@ -309,7 +315,7 @@ func SetupDefaultActors(ctx context.Context, st state.Tree, storageMap vm.Storag
 				return err
 			}
 		} else {
-			_, err = ApplyMessageDirect(ctx, st, storageMap, address.LegacyNetworkAddress, address.InitAddress, uint64(i), val, initactor.ExecMethodID, types.AccountActorCodeCid, []interface{}{addr})
+			_, err = vm.ApplyGenesisMessage(address.LegacyNetworkAddress, address.InitAddress, initactor.ExecMethodID, val, types.AccountActorCodeCid, []interface{}{addr})
 			if err != nil {
 				return err
 			}

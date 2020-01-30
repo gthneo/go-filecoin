@@ -196,8 +196,10 @@ func Assert(cond bool) {
 type Storage interface {
 	// Put stores an object and returns its content-addressable ID.
 	Put(interface{}) cid.Cid
-	// Put stores an object and returns its content-addressable ID.
+	// Get retrieves an object, returns true if it exists.
 	Get(cid cid.Cid, obj interface{}) bool
+	// GetRaw retrieves the raw bytes stored, returns true if it exists.
+	GetRaw(cid cid.Cid) ([]byte, bool)
 	// CidOf returns the content-addressable ID of an object WITHOUT storing it.
 	CidOf(interface{}) cid.Cid
 }

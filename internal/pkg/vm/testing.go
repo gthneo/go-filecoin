@@ -278,6 +278,15 @@ func (ts *testStorage) Get(cid cid.Cid, obj interface{}) bool {
 	return true
 }
 
+func (ts *testStorage) GetRaw(cid cid.Cid) ([]byte, bool) {
+	node, err := cbor.WrapObject(ts.state, types.DefaultHashFunction, -1)
+	if err != nil {
+		return nil, false
+	}
+
+	return node.RawData(), true
+}
+
 func (ts *testStorage) CidOf(obj interface{}) cid.Cid {
 	if obj == nil {
 		return cid.Undef

@@ -51,12 +51,13 @@ type ActorImplLookup interface {
 type MinerPenaltyFIL = types.AttoFIL
 
 type internalMessage struct {
-	miner  address.Address
-	from   address.Address
-	to     address.Address
-	value  types.AttoFIL
-	method types.MethodID
-	params []byte
+	miner         address.Address
+	from          address.Address
+	to            address.Address
+	value         types.AttoFIL
+	method        types.MethodID
+	params        []byte
+	callSeqNumber types.Uint64
 }
 
 // actorStorage hides the storage methods from the actors and turns the errors into runtime panics.
@@ -72,6 +73,29 @@ func NewVM(rnd RandomnessSource, actorImpls ActorImplLookup, store storage.VMSto
 		store:      store,
 		state:      state.NewCachedTree(st),
 	}
+}
+
+// ApplyGenesisMessage forces the execution of a message in the vm actor.
+//
+// This method is intended to be used in the generation of the genesis block only.
+func (vm *VM) ApplyGenesisMessage(from address.Address, to address.Address, method types.MethodID, value types.AttoFIL, params ...interface{}) (interface{}, error) {
+	// get the params into bytes
+	encodedParams, err := abi.ToEncodedValues(params...)
+	if err != nil {
+		return nil, err
+	}
+
+	// build internal message
+	imsg := internalMessage{
+		miner:  address.Undef,
+		from:   from,
+		to:     to,
+		value:  value,
+		method: method,
+		params: encodedParams,
+	}
+
+	return vm.applyImplicitMessage(imsg)
 }
 
 // implement VMInterpreter for VM
@@ -179,7 +203,7 @@ func (vm *VM) ApplyTipSetMessages(blocks []interpreter.BlockMessagesInfo, epoch 
 // This messages do not consume client gas are do not fail.
 func (vm *VM) applyImplicitMessage(imsg internalMessage) (out interface{}, err error) {
 	defer func() {
-		if r := recover(); r == nil {
+		if r := recover(); r != nil {
 			switch r.(type) {
 			case runtime.ExecutionPanic:
 				p := r.(runtime.ExecutionPanic)
@@ -207,6 +231,8 @@ func (vm *VM) applyImplicitMessage(imsg internalMessage) (out interface{}, err e
 	if fromActor == nil || err != nil {
 		return nil, errors.New("implicit message `from` actor not found")
 	}
+
+	imsg.callSeqNumber = fromActor.CallSeqNum
 
 	// 2. increment seq number
 	fromActor.IncrementSeqNum()
@@ -295,12 +321,13 @@ func (vm *VM) applyMessage(msg *types.UnsignedMessage, onChainMsgSize uint32, mi
 
 	// 1. build internal msg
 	imsg := internalMessage{
-		miner:  miner,
-		from:   msg.From,
-		to:     msg.To,
-		value:  msg.Value,
-		method: msg.Method,
-		params: msg.Params,
+		miner:         miner,
+		from:          msg.From,
+		to:            msg.To,
+		value:         msg.Value,
+		method:        msg.Method,
+		params:        msg.Params,
+		callSeqNumber: msg.CallSeqNum,
 	}
 
 	// 2. build invocation context
@@ -314,7 +341,7 @@ func (vm *VM) applyMessage(msg *types.UnsignedMessage, onChainMsgSize uint32, mi
 		defer func() {
 			// TODO: discard "non-checkpointed" state changes (issue: #3718)
 
-			if r := recover(); r == nil {
+			if r := recover(); r != nil {
 				switch r.(type) {
 				case runtime.ExecutionPanic:
 					p := r.(runtime.ExecutionPanic)
@@ -370,7 +397,7 @@ func (vm *VM) getMinerOwner(minerAddr address.Address) address.Address {
 	}
 
 	// build state handle
-	var stateHandle = NewReadonlyStateHandle(vm.LegacyStorage(), minerActorEntry.Head)
+	var stateHandle = NewReadonlyStateHandle(vm.Storage(), minerActorEntry.Head)
 
 	// get a view into the actor state
 	minerView := miner.NewView(stateHandle, vm.LegacyStorage())
@@ -508,6 +535,17 @@ func (s actorStorage) Get(cid cid.Cid, obj interface{}) bool {
 		panic(fmt.Errorf("could not get obj from store. %s", err))
 	}
 	return true
+}
+
+func (s actorStorage) GetRaw(cid cid.Cid) ([]byte, bool) {
+	raw, err := s.inner.GetRaw(cid)
+	if err == storage.ErrNotFound {
+		return nil, false
+	}
+	if err != nil {
+		panic(fmt.Errorf("could not get obj from store. %s", err))
+	}
+	return raw, true
 }
 
 //
