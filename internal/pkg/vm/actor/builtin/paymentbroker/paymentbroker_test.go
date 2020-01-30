@@ -1133,7 +1133,7 @@ func establishChannel(ctx context.Context, st state.Tree, vms storagemap.Storage
 	return channelID
 }
 
-func requireGenesis(ctx context.Context, t *testing.T, targetAddresses ...address.Address) (*hamt.CborIpldStore, state.Tree, storagemap.StorageMap) {
+func requireGenesis(ctx context.Context, t *testing.T, targetAddresses ...address.Address) (hamt.CborIpldStore, state.Tree, storagemap.StorageMap) {
 	bs := blockstore.NewBlockstore(datastore.NewMapDatastore())
 	vms := storagemap.NewStorageMap(bs)
 

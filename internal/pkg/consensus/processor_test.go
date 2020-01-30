@@ -26,7 +26,7 @@ import (
 	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/state"
 )
 
-func requireMakeStateTree(t *testing.T, cst *hamt.CborIpldStore, acts map[address.Address]*actor.Actor) (cid.Cid, state.Tree) {
+func requireMakeStateTree(t *testing.T, cst hamt.CborIpldStore, acts map[address.Address]*actor.Actor) (cid.Cid, state.Tree) {
 	ctx := context.Background()
 	tree := state.NewTree(cst)
 
