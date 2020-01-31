@@ -19,7 +19,7 @@ require (
 	github.com/filecoin-project/go-address v0.0.0-20191219011437-af739c490b4f
 	github.com/filecoin-project/go-amt-ipld v0.0.0-20190920035751-ae3c37184616
 	github.com/filecoin-project/go-data-transfer v0.0.0-20191219005021-4accf56bd2ce
-	github.com/filecoin-project/go-fil-markets v0.0.0-20200122013934-353c6e8ac576
+	github.com/filecoin-project/go-fil-markets v0.0.0-20200128011124-cd7aa319b99b
 	github.com/filecoin-project/go-leb128 v0.0.0-20190212224330-8d79a5489543
 	github.com/filecoin-project/go-paramfetch v0.0.1
 	github.com/filecoin-project/go-sectorbuilder v0.0.2-0.20200114015900-4103afa82689
@@ -34,7 +34,7 @@ require (
 	github.com/ipfs/go-bitswap v0.1.8
 	github.com/ipfs/go-block-format v0.0.2
 	github.com/ipfs/go-blockservice v0.1.3-0.20190908200855-f22eea50656c
-	github.com/ipfs/go-car v0.0.3-0.20191203022317-23b0a85fd1b1
+	github.com/ipfs/go-car v0.0.3-0.20200124090545-1a340009d896
 	github.com/ipfs/go-cid v0.0.4
 	github.com/ipfs/go-datastore v0.1.1
 	github.com/ipfs/go-ds-badger v0.0.7
@@ -124,3 +124,5 @@ require (
 )
 
 replace github.com/filecoin-project/filecoin-ffi => ./vendors/filecoin-ffi
+
+replace github.com/filecoin-project/go-fil-markets => ../go-fil-markets
