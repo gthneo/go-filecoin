@@ -120,33 +120,32 @@ func GenGen(ctx context.Context, cfg *GenesisCfg, cst *hamt.CborIpldStore, bs bl
 	}
 
 	st := state.NewTree(cst)
-	storageMap := vm.NewStorageMap(bs)
 	store := vm.NewStorage(bs)
-	vm := vm.NewVM(st, store).(consensus.GenesisVM)
+	vm := vm.NewVM(st, &store).(consensus.GenesisVM)
 
 	if err := actor.InitBuiltinActorCodeObjs(cst); err != nil {
 		return nil, err
 	}
 
-	if err := consensus.SetupDefaultActors(ctx, vm, st, storageMap, cfg.ProofsMode, cfg.Network); err != nil {
+	if err := consensus.SetupDefaultActors(ctx, vm, &store, st, cfg.ProofsMode, cfg.Network); err != nil {
 		return nil, err
 	}
 
-	if err := setupPrealloc(ctx, vm, st, storageMap, keys, cfg.PreAlloc); err != nil {
+	if err := setupPrealloc(ctx, vm, st, keys, cfg.PreAlloc); err != nil {
 		return nil, err
 	}
 
-	miners, err := setupMiners(vm, st, storageMap, keys, cfg.Miners, pnrg)
+	miners, err := setupMiners(vm, st, keys, cfg.Miners, pnrg)
+	if err != nil {
+		return nil, err
+	}
+
+	err = store.Flush()
 	if err != nil {
 		return nil, err
 	}
 
 	stateRoot, err := st.Flush(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	err = storageMap.Flush()
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +198,7 @@ func genKeys(cfgkeys int, pnrg io.Reader) ([]*types.KeyInfo, error) {
 	return keys, nil
 }
 
-func setupPrealloc(ctx context.Context, vm consensus.GenesisVM, st state.Tree, storageMap vm.StorageMap, keys []*types.KeyInfo, prealloc []string) error {
+func setupPrealloc(ctx context.Context, vm consensus.GenesisVM, st state.Tree, keys []*types.KeyInfo, prealloc []string) error {
 
 	if len(keys) < len(prealloc) {
 		return fmt.Errorf("keys do not match prealloc")
@@ -236,7 +235,7 @@ func setupPrealloc(ctx context.Context, vm consensus.GenesisVM, st state.Tree, s
 	return nil
 }
 
-func setupMiners(vm consensus.GenesisVM, st state.Tree, sm vm.StorageMap, keys []*types.KeyInfo, miners []*CreateStorageMinerConfig, pnrg io.Reader) ([]RenderedMinerInfo, error) {
+func setupMiners(vm consensus.GenesisVM, st state.Tree, keys []*types.KeyInfo, miners []*CreateStorageMinerConfig, pnrg io.Reader) ([]RenderedMinerInfo, error) {
 	var minfos []RenderedMinerInfo
 
 	for _, m := range miners {

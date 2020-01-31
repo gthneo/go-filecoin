@@ -83,7 +83,7 @@ func (p *DefaultProcessor) ProcessTipSet(ctx context.Context, st state.Tree, vms
 	}
 	epoch := types.NewBlockHeight(h)
 
-	vm := vm.NewVM(st, vms)
+	vm := vm.NewVM(st, &vms)
 
 	return vm.ApplyTipSetMessages(msgs, *epoch)
 }

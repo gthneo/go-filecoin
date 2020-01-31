@@ -32,7 +32,7 @@ var vmLog = logging.Logger("vm.context")
 type VM struct {
 	rnd          RandomnessSource
 	actorImpls   ActorImplLookup
-	store        storage.VMStorage
+	store        *storage.VMStorage
 	state        *state.CachedTree
 	currentEpoch types.BlockHeight
 }
@@ -66,7 +66,7 @@ type actorStorage struct {
 }
 
 // NewVM creates a new runtime for executing messages.
-func NewVM(rnd RandomnessSource, actorImpls ActorImplLookup, store storage.VMStorage, st state.Tree) VM {
+func NewVM(rnd RandomnessSource, actorImpls ActorImplLookup, store *storage.VMStorage, st state.Tree) VM {
 	return VM{
 		rnd:        rnd,
 		actorImpls: actorImpls,
@@ -79,6 +79,7 @@ func NewVM(rnd RandomnessSource, actorImpls ActorImplLookup, store storage.VMSto
 //
 // This method is intended to be used in the generation of the genesis block only.
 func (vm *VM) ApplyGenesisMessage(from address.Address, to address.Address, method types.MethodID, value types.AttoFIL, params ...interface{}) (interface{}, error) {
+	fmt.Printf("apply message\n")
 	// get the params into bytes
 	encodedParams, err := abi.ToEncodedValues(params...)
 	if err != nil {
@@ -95,7 +96,23 @@ func (vm *VM) ApplyGenesisMessage(from address.Address, to address.Address, meth
 		params: encodedParams,
 	}
 
-	return vm.applyImplicitMessage(imsg)
+	ret, err := vm.applyImplicitMessage(imsg)
+	if err != nil {
+		return ret, err
+	}
+
+	// commit state
+	// flush all objects out
+	if err := vm.store.Flush(); err != nil {
+		return nil, err
+	}
+	// commit new actor state
+	if err := vm.state.Commit(context.Background()); err != nil {
+		return nil, err
+	}
+	// TODO: update state root (issue: #3718)
+
+	return ret, nil
 }
 
 // implement VMInterpreter for VM
@@ -475,7 +492,7 @@ func (vm *VM) Randomness(epoch types.BlockHeight, offset uint64) runtime.Randomn
 
 // Storage implements runtime.Runtime.
 func (vm *VM) Storage() runtime.Storage {
-	return actorStorage{inner: &vm.store}
+	return actorStorage{inner: vm.store}
 }
 
 // LegacyStorage implements runtime.Runtime.

@@ -8,6 +8,7 @@ import (
 	bls "github.com/filecoin-project/filecoin-ffi"
 	"github.com/filecoin-project/go-amt-ipld"
 	"github.com/filecoin-project/go-filecoin/internal/pkg/block"
+	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-hamt-ipld"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	"github.com/libp2p/go-libp2p-core/peer"
@@ -154,8 +155,7 @@ func MakeGenesisFunc(opts ...GenOption) GenesisInitFunc {
 		ctx := context.Background()
 		st := state.NewTree(cst)
 		store := vm.NewStorage(bs)
-		storageMap := vm.NewStorageMap(bs)
-		vm := vm.NewVM(st, store).(GenesisVM)
+		vm := vm.NewVM(st, &store).(GenesisVM)
 
 		genCfg := NewEmptyConfig()
 		for _, opt := range opts {
@@ -164,7 +164,7 @@ func MakeGenesisFunc(opts ...GenOption) GenesisInitFunc {
 			}
 		}
 
-		if err := SetupDefaultActors(ctx, vm, st, storageMap, genCfg.proofsMode, genCfg.network); err != nil {
+		if err := SetupDefaultActors(ctx, vm, &store, st, genCfg.proofsMode, genCfg.network); err != nil {
 			return nil, err
 		}
 
@@ -194,15 +194,7 @@ func MakeGenesisFunc(opts ...GenOption) GenesisInitFunc {
 		for addr, val := range genCfg.miners {
 			a := miner.NewActor()
 			a.Balance = val.balance
-			s := storageMap.NewStorage(addr, a)
-			scid, err := s.Put(val.state)
-			if err != nil {
-				return nil, err
-			}
-			if err = s.LegacyCommit(scid, a.Head); err != nil {
-				return nil, err
-			}
-			if err := st.SetActor(ctx, addr, a); err != nil {
+			if err := st.SetActor(context.Background(), addr, a); err != nil {
 				return nil, err
 			}
 		}
@@ -224,6 +216,11 @@ func MakeGenesisFunc(opts ...GenOption) GenesisInitFunc {
 		}
 
 		if err := actor.InitBuiltinActorCodeObjs(cst); err != nil {
+			return nil, err
+		}
+
+		err := store.Flush()
+		if err != nil {
 			return nil, err
 		}
 
@@ -252,44 +249,43 @@ func MakeGenesisFunc(opts ...GenOption) GenesisInitFunc {
 			return nil, err
 		}
 
-		err = storageMap.Flush()
-		if err != nil {
-			return nil, err
-		}
-
 		return genesis, nil
 	}
 }
 
 // SetupDefaultActors inits the builtin actors that are required to run filecoin.
-func SetupDefaultActors(ctx context.Context, vm GenesisVM, st state.Tree, storageMap vm.StorageMap, storeType types.ProofsMode, network string) error {
-	stAct := storagemarket.NewActor()
-	err := (&storagemarket.Actor{}).InitializeState(storageMap.NewStorage(address.StorageMarketAddress, stAct), storeType)
-	if err != nil {
-		return err
-	}
-	if err := st.SetActor(ctx, address.StorageMarketAddress, stAct); err != nil {
-		return err
+func SetupDefaultActors(ctx context.Context, vm GenesisVM, store *vm.Storage, st state.Tree, storeType types.ProofsMode, network string) error {
+	createActor := func(addr address.Address, codeCid cid.Cid, state interface{}) *actor.Actor {
+
+		a := actor.Actor{
+			Head:       cid.Undef,
+			Code:       codeCid,
+			CallSeqNum: 0,
+			Balance:    types.ZeroAttoFIL,
+		}
+		if state != nil {
+			var err error
+			a.Head, err = store.Put(state)
+			if err != nil {
+				panic("failed to store state")
+			}
+		}
+		st.SetActor(context.Background(), addr, &a)
+
+		return &a
 	}
 
-	powAct := power.NewActor()
-	err = (&power.Actor{}).InitializeState(storageMap.NewStorage(address.StoragePowerAddress, powAct), nil)
-	if err != nil {
-		return err
-	}
-	err = st.SetActor(ctx, address.StoragePowerAddress, powAct)
-	if err != nil {
-		return err
-	}
+	createActor(address.InitAddress, types.InitActorCodeCid, initactor.State{
+		Network: network,
+		NextID:  100,
+	})
 
-	intAct := initactor.NewActor()
-	err = (&initactor.Actor{}).InitializeState(storageMap.NewStorage(address.InitAddress, intAct), network)
-	if err != nil {
-		return err
-	}
-	if err := st.SetActor(ctx, address.InitAddress, intAct); err != nil {
-		return err
-	}
+	createActor(address.StoragePowerAddress, types.PowerActorCodeCid, power.State{})
+
+	createActor(address.StorageMarketAddress, types.StorageMarketActorCodeCid, storagemarket.State{
+		TotalCommittedStorage: types.NewBytesAmount(0),
+		ProofsMode:            storeType,
+	})
 
 	// sort addresses so genesis generation will be stable
 	sortedAddresses := []string{}
