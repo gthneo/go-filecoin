@@ -2,13 +2,13 @@ package vmcontext
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"runtime/debug"
 
 	"github.com/filecoin-project/go-filecoin/internal/pkg/types"
 	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/abi"
 	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/actor/builtin/cron"
+	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/actor/builtin/initactor"
 	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/actor/builtin/miner"
 	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/actor/builtin/reward"
 	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/actor/builtin/storagemining"
@@ -68,10 +68,11 @@ type actorStorage struct {
 // NewVM creates a new runtime for executing messages.
 func NewVM(rnd RandomnessSource, actorImpls ActorImplLookup, store *storage.VMStorage, st state.Tree) VM {
 	return VM{
-		rnd:        rnd,
-		actorImpls: actorImpls,
-		store:      store,
-		state:      state.NewCachedTree(st),
+		rnd:          rnd,
+		actorImpls:   actorImpls,
+		store:        store,
+		state:        state.NewCachedTree(st),
+		currentEpoch: *types.NewBlockHeight(0),
 	}
 }
 
@@ -79,12 +80,14 @@ func NewVM(rnd RandomnessSource, actorImpls ActorImplLookup, store *storage.VMSt
 //
 // This method is intended to be used in the generation of the genesis block only.
 func (vm *VM) ApplyGenesisMessage(from address.Address, to address.Address, method types.MethodID, value types.AttoFIL, params ...interface{}) (interface{}, error) {
-	fmt.Printf("apply message\n")
 	// get the params into bytes
 	encodedParams, err := abi.ToEncodedValues(params...)
 	if err != nil {
 		return nil, err
 	}
+
+	// normalize from addr
+	from = vm.normalizeFrom(from)
 
 	// build internal message
 	imsg := internalMessage{
@@ -113,6 +116,28 @@ func (vm *VM) ApplyGenesisMessage(from address.Address, to address.Address, meth
 	// TODO: update state root (issue: #3718)
 
 	return ret, nil
+}
+
+func (vm *VM) normalizeFrom(from address.Address) address.Address {
+	// resolve the target address via the InitActor, and attempt to load state.
+	initActorEntry, err := vm.state.GetActor(context.Background(), address.InitAddress)
+	if err != nil {
+		panic(fmt.Errorf("init actor not found. %s", err))
+	}
+
+	// build state handle
+	var stateHandle = NewReadonlyStateHandle(vm.Storage(), initActorEntry.Head)
+
+	// get a view into the actor state
+	initView := initactor.NewView(stateHandle, vm.Storage())
+
+	// lookup the ActorID based on the address
+	targetIDAddr, ok := initView.GetIDAddressByAddress(from)
+	if !ok {
+		panic("TODO")
+	}
+
+	return targetIDAddr
 }
 
 // implement VMInterpreter for VM
@@ -246,7 +271,7 @@ func (vm *VM) applyImplicitMessage(imsg internalMessage) (out interface{}, err e
 	// 1. load from actor
 	fromActor, err := vm.state.GetActor(context.Background(), imsg.from)
 	if fromActor == nil || err != nil {
-		return nil, errors.New("implicit message `from` actor not found")
+		return nil, fmt.Errorf("implicit message `from` field actor not found, addr: %s", imsg.from)
 	}
 
 	imsg.callSeqNumber = fromActor.CallSeqNum

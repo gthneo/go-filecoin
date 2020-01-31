@@ -41,7 +41,7 @@ func newInvocationContext(rt *VM, msg internalMessage, fromActor *actor.Actor, g
 		fromActor:         fromActor,
 		gasTank:           gasTank,
 		isCallerValidated: false,
-		allowSideEffects:  false,
+		allowSideEffects:  true,
 	}
 }
 
@@ -86,7 +86,6 @@ func (ctx *invocationContext) invoke() interface{} {
 	actorImpl := ctx.rt.getActorImpl(ctx.toActor.Code)
 
 	// 6. create target state handle
-	fmt.Printf("Reading actor state, actor: %s, head: %s\n", ctx.msg.to.String(), ctx.toActor.Head.String())
 	stateHandle := newActorStateHandle((*stateHandleContext)(ctx), ctx.toActor.Head)
 	ctx.stateHandle = &stateHandle
 
@@ -124,7 +123,6 @@ func (ctx *invocationContext) invoke() interface{} {
 	// 2. validate state access
 	ctx.stateHandle.Validate()
 
-	fmt.Printf("Updating actor state, actor: %s, head: %s\n", ctx.msg.to.String(), stateHandle.head.String())
 	ctx.toActor.Head = stateHandle.head
 
 	// 3. success! build the receipt
@@ -317,7 +315,6 @@ func (ctx *invocationContext) CreateActor(actorID types.Uint64, code cid.Cid, pa
 	if err != nil {
 		runtime.Abortf(exitcode.MethodAbort, "Could not create IDAddress for actor")
 	}
-	fmt.Printf("Create new address, actorID: %d, addr: %s\n", actorID, idAddr)
 
 	// Check existing address. If nothing there, create empty actor.
 	//

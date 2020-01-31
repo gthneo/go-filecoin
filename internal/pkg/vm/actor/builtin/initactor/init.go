@@ -2,7 +2,6 @@ package initactor
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"reflect"
 
@@ -220,14 +219,16 @@ func (*Impl) GetNetwork(ctx runtime.InvocationContext) (string, uint8, error) {
 }
 
 // GetActorIDForAddress looks up the actor id for a filecoin address.
-func (a *Impl) GetActorIDForAddress(rt invocationContext, addr address.Address) (*big.Int, uint8, error) {
-	if err := rt.Charge(actor.DefaultGasCost); err != nil {
+func (a *Impl) GetActorIDForAddress(ctx invocationContext, addr address.Address) (*big.Int, uint8, error) {
+	ctx.ValidateCaller(pattern.Any{})
+
+	if err := ctx.Charge(actor.DefaultGasCost); err != nil {
 		return big.NewInt(0), internal.ErrInsufficientGas, errors.RevertErrorWrap(err, "Insufficient gas")
 	}
 
 	var state State
-	id, err := rt.StateHandle().Transaction(&state, func() (interface{}, error) {
-		return lookupIDAddress(rt, state, addr)
+	id, err := ctx.StateHandle().Transaction(&state, func() (interface{}, error) {
+		return lookupIDAddress(ctx, state, addr)
 	})
 	if err != nil {
 		if err == hamt.ErrNotFound {
@@ -281,8 +282,6 @@ func (a *Impl) Exec(vmctx invocationContext, codeCID cid.Cid, params []interface
 	// Dragons: clean this up to match spec
 	var state State
 	out, err := vmctx.StateHandle().Transaction(&state, func() (interface{}, error) {
-		fmt.Printf("Exec code: %s, nextId: %d\n", codeCID.String(), state.NextID)
-
 		// create id address
 		actorID := state.assignNewID()
 
@@ -294,7 +293,6 @@ func (a *Impl) Exec(vmctx invocationContext, codeCID cid.Cid, params []interface
 
 	actorID := out.(types.Uint64)
 
-	fmt.Printf("actorID:%d\n", actorID)
 	actorAddr := vmctx.CreateActor(actorID, codeCID, params)
 
 	_, err = vmctx.StateHandle().Transaction(&state, func() (interface{}, error) {

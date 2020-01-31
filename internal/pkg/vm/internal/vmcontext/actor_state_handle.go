@@ -61,6 +61,18 @@ func newActorStateHandle(ctx actorStateHandleContext, head cid.Cid) actorStateHa
 
 var _ runtime.ActorStateHandle = (*actorStateHandle)(nil)
 
+func (h *actorStateHandle) Create(obj interface{}) {
+	if h.head != cid.Undef {
+		runtime.Abortf(exitcode.MethodAbort, "Actor state already initialized")
+	}
+
+	// store state
+	h.head = h.ctx.Storage().Put(obj)
+
+	// update internal ref to state
+	h.usedObj = obj
+}
+
 // Readonly is the implementation of the ActorStateHandle interface.
 func (h *actorStateHandle) Readonly(obj interface{}) {
 	// track the variable used by the caller

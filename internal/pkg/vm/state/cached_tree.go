@@ -2,7 +2,6 @@ package state
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/actor"
 	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/address"
@@ -63,7 +62,6 @@ func (t *CachedTree) GetOrCreateActor(ctx context.Context,
 // Commit takes all the cached actors and sets them into the underlying cache.
 func (t *CachedTree) Commit(ctx context.Context) error {
 	for addr, actor := range t.cache {
-		fmt.Printf("Commiting actor, actor: %s, head: %s\n", addr.String(), actor.Head.String())
 		err := t.st.SetActor(ctx, addr, actor)
 		if err != nil {
 			return errors.FaultErrorWrap(err, "Could not commit cached actors to state tree.")

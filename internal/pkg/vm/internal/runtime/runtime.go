@@ -104,6 +104,10 @@ type LegacyInvocationContext interface {
 // ActorStateHandle handles the actor state, allowing actors to lock on the state.
 type ActorStateHandle interface {
 	ReadonlyActorStateHandle
+	// Create initializes the state to the given value.
+	//
+	// This operation is only valid if the value has never been set before.
+	Create(obj interface{})
 	// Transaction loads a mutable version of the state into the `obj` argument and protects
 	// the execution from side effects.
 	//

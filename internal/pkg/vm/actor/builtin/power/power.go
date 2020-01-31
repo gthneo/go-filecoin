@@ -18,6 +18,8 @@ import (
 	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/errors"
 	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/internal/dispatch"
 	internal "github.com/filecoin-project/go-filecoin/internal/pkg/vm/internal/errors"
+	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/internal/exitcode"
+	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/internal/pattern"
 	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/internal/runtime"
 	"github.com/filecoin-project/go-filecoin/internal/pkg/vm/internal/storage"
 )
@@ -159,37 +161,35 @@ var Errors = map[uint8]error{
 	ErrDuplicateEntry:       errors.NewCodedRevertError(ErrDuplicateEntry, "duplicate create power table entry attempt"),
 }
 
-type invocationContext interface {
-	runtime.InvocationContext
-	LegacyAddressForNewActor() (address.Address, error)
-}
-
 // CreateStorageMiner creates a new record of a miner in the power table.
-func (*impl) createStorageMiner(vmctx invocationContext, ownerAddr, workerAddr address.Address, pid peer.ID, sectorSize *types.BytesAmount) (address.Address, uint8, error) {
+func (*impl) createStorageMiner(vmctx runtime.InvocationContext, ownerAddr, workerAddr address.Address, pid peer.ID, sectorSize *types.BytesAmount) (address.Address, uint8, error) {
+	vmctx.ValidateCaller(pattern.Any{})
+
 	if err := vmctx.Charge(actor.DefaultGasCost); err != nil {
 		return address.Undef, internal.ErrInsufficientGas, errors.RevertErrorWrap(err, "Insufficient gas")
 	}
+
+	actorCodeCid := types.MinerActorCodeCid
+	epoch := vmctx.Runtime().CurrentEpoch()
+	if epoch.Equal(types.NewBlockHeight(0)) {
+		actorCodeCid = types.BootstrapMinerActorCodeCid
+	}
+
+	initParams := []interface{}{vmctx.Message().Caller(), vmctx.Message().Caller(), pid, sectorSize}
+
+	// create miner actor by messaging the init actor and sending it collateral
+	ret := vmctx.Send(address.InitAddress, initactor.ExecMethodID, vmctx.Message().ValueReceived(), []interface{}{actorCodeCid, initParams})
+
+	addr := ret.(address.Address)
+
+	// retrieve id to key miner
+	actorIDAddr, err := retreiveActorID(vmctx, addr)
+	if err != nil {
+		runtime.Abortf(exitcode.ActorNotFound, "could not retrieve actor id addrs after initializing actor")
+	}
+
 	var state State
-	ret, err := actor.WithState(vmctx, &state, func() (interface{}, error) {
-		actorCodeCid := types.MinerActorCodeCid
-		epoch := vmctx.Runtime().CurrentEpoch()
-		if epoch.Equal(types.NewBlockHeight(0)) {
-			actorCodeCid = types.BootstrapMinerActorCodeCid
-		}
-
-		initParams := []interface{}{vmctx.Message().Caller(), vmctx.Message().Caller(), pid, sectorSize}
-
-		// create miner actor by messaging the init actor and sending it collateral
-		ret := vmctx.Send(address.InitAddress, initactor.ExecMethodID, vmctx.Message().ValueReceived(), []interface{}{actorCodeCid, initParams})
-
-		addr := ret.(address.Address)
-
-		// retrieve id to key miner
-		actorIDAddr, err := retreiveActorID(vmctx, addr)
-		if err != nil {
-			return nil, errors.FaultErrorWrapf(err, "could not retrieve actor id addrs after initializing actor")
-		}
-
+	ret, err = vmctx.StateHandle().Transaction(&state, func() (interface{}, error) {
 		// Update power table.
 		ctx := context.Background()
 		newPowerTable, err := actor.WithLookup(ctx, vmctx.Runtime().Storage(), state.PowerTable, func(lookup storage.Lookup) error {
@@ -229,7 +229,7 @@ func (*impl) createStorageMiner(vmctx invocationContext, ownerAddr, workerAddr a
 }
 
 // retriveActorId uses init actor to map an actorAddress to an id address
-func retreiveActorID(vmctx invocationContext, actorAddr address.Address) (address.Address, error) {
+func retreiveActorID(vmctx runtime.InvocationContext, actorAddr address.Address) (address.Address, error) {
 	ret := vmctx.Send(address.InitAddress, initactor.GetActorIDForAddressMethodID, types.ZeroAttoFIL, []interface{}{actorAddr})
 
 	actorIDVal := ret.(*big.Int)
@@ -239,7 +239,7 @@ func retreiveActorID(vmctx invocationContext, actorAddr address.Address) (addres
 
 // RemoveStorageMiner removes the given miner address from the power table.  This call will fail if
 // the miner has any power remaining in the table or if the actor does not already exit in the table.
-func (*impl) removeStorageMiner(vmctx invocationContext, delAddr address.Address) (uint8, error) {
+func (*impl) removeStorageMiner(vmctx runtime.InvocationContext, delAddr address.Address) (uint8, error) {
 	if err := vmctx.Charge(actor.DefaultGasCost); err != nil {
 		return internal.ErrInsufficientGas, errors.RevertErrorWrap(err, "Insufficient gas")
 	}
@@ -280,7 +280,7 @@ func (*impl) removeStorageMiner(vmctx invocationContext, delAddr address.Address
 }
 
 // GetTotalPower returns the total power (in bytes) held by all miners registered in the system
-func (*impl) getTotalPower(vmctx invocationContext) (*types.BytesAmount, uint8, error) {
+func (*impl) getTotalPower(vmctx runtime.InvocationContext) (*types.BytesAmount, uint8, error) {
 	if err := vmctx.Charge(actor.DefaultGasCost); err != nil {
 		return nil, internal.ErrInsufficientGas, errors.RevertErrorWrap(err, "Insufficient gas")
 	}
@@ -311,7 +311,7 @@ func (*impl) getTotalPower(vmctx invocationContext) (*types.BytesAmount, uint8, 
 	return ret.(*types.BytesAmount), 0, nil
 }
 
-func (*impl) getPowerReport(vmctx invocationContext, addr address.Address) (types.PowerReport, uint8, error) {
+func (*impl) getPowerReport(vmctx runtime.InvocationContext, addr address.Address) (types.PowerReport, uint8, error) {
 	if err := vmctx.Charge(actor.DefaultGasCost); err != nil {
 		return types.PowerReport{}, internal.ErrInsufficientGas, errors.RevertErrorWrap(err, "Insufficient gas")
 	}
@@ -341,7 +341,7 @@ func (*impl) getPowerReport(vmctx invocationContext, addr address.Address) (type
 	return ret.(types.PowerReport), 0, nil
 }
 
-func (*impl) getSectorSize(vmctx invocationContext, addr address.Address) (*types.BytesAmount, uint8, error) {
+func (*impl) getSectorSize(vmctx runtime.InvocationContext, addr address.Address) (*types.BytesAmount, uint8, error) {
 	if err := vmctx.Charge(actor.DefaultGasCost); err != nil {
 		return nil, internal.ErrInsufficientGas, errors.RevertErrorWrap(err, "Insufficient gas")
 	}
@@ -369,13 +369,15 @@ func (*impl) getSectorSize(vmctx invocationContext, addr address.Address) (*type
 }
 
 // ProcessPowerReport updates a registered miner's power table entry according to the power report.
-func (*impl) processPowerReport(vmctx invocationContext, report types.PowerReport, updateAddr address.Address) (uint8, error) {
+func (*impl) processPowerReport(vmctx runtime.InvocationContext, report types.PowerReport, updateAddr address.Address) (uint8, error) {
+	vmctx.ValidateCaller(pattern.Any{})
+
 	if err := vmctx.Charge(actor.DefaultGasCost); err != nil {
 		return internal.ErrInsufficientGas, errors.RevertErrorWrap(err, "Insufficient gas")
 	}
 
 	var state State
-	_, err := actor.WithState(vmctx, &state, func() (interface{}, error) {
+	_, err := vmctx.StateHandle().Transaction(&state, func() (interface{}, error) {
 		ctx := context.Background()
 		newPowerTable, err := actor.WithLookup(ctx, vmctx.Runtime().Storage(), state.PowerTable, func(lookup storage.Lookup) error {
 			// Find entry to update.
